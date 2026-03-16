@@ -1,5 +1,5 @@
 [project]
-name = "investigation-kg-backend"
+name = "lecture-graph-db"
 version = "0.1.0"
 description = "수사 지식 그래프 백엔드 - LLM + Neo4j"
 requires-python = ">=3.13"
