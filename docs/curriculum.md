@@ -1175,15 +1175,22 @@ lecture-graph-db/
 │   │   ├── models.py         # Pydantic 모델
 │   │   ├── routers/
 │   │   │   ├── __init__.py
-│   │   │   ├── graph.py      # 그래프 CRUD        ← 세션 3
-│   │   │   ├── samples.py    # 샘플 문서 제공     ← 세션 3
-│   │   │   ├── extract.py    # LLM 추출           ← 세션 5
-│   │   │   ├── ask.py        # 질의응답           ← 세션 6
-│   │   │   └── analysis.py   # 그래프 알고리즘    ← 세션 7
+│   │   │   ├── graph.py      # 그래프 CRUD+검색+수정+내보내기  ← 세션 3, 3.5
+│   │   │   ├── samples.py    # 샘플 문서 제공                 ← 세션 3
+│   │   │   ├── extract.py    # LLM 추출                      ← 세션 5
+│   │   │   ├── validate.py   # 추출 품질 검증                 ← 세션 5.5
+│   │   │   ├── ask.py        # 질의응답+Cypher 해설           ← 세션 6, 6.5
+│   │   │   ├── conversation.py # 멀티턴 대화                  ← 세션 6.5
+│   │   │   ├── analysis.py   # 그래프 알고리즘                ← 세션 7
+│   │   │   ├── investigation.py # 자금 흐름+시간대 분석       ← 세션 7.3
+│   │   │   └── report.py     # 수사 리포트 생성               ← 세션 7.5
 │   │   └── prompts/
 │   │       ├── __init__.py
-│   │       ├── extraction.py # 추출 프롬프트      ← 세션 5
-│   │       └── cypher_gen.py # Cypher 생성 프롬프트 ← 세션 6
+│   │       ├── extraction.py  # 추출 프롬프트                 ← 세션 5
+│   │       ├── validation.py  # 검증 프롬프트                 ← 세션 5.5
+│   │       ├── cypher_gen.py  # Cypher 생성 프롬프트          ← 세션 6
+│   │       ├── conversation.py # 멀티턴 대화 프롬프트         ← 세션 6.5
+│   │       └── report.py      # 리포트 생성 프롬프트          ← 세션 7.5
 │   ├── checkpoints/           # 세션별 완성본 (뒤처진 수강생 구제용)
 │   │   ├── session3_complete/
 │   │   ├── session5_complete/
@@ -1347,6 +1354,8 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx   ← 본인의 키를 붙여넣기!
 > - `GET /nodes` — 모든 노드 조회 (저장된 노드 목록 보기)
 > - `POST /relationships` — 새 관계 생성 (예: 김철수-[KNOWS]->박영수)
 > - `GET /full` — 전체 그래프 조회 (모든 노드와 관계)
+> - `GET /search?q=키워드` — 노드 키워드 검색 (이름, 속성 등에서 검색)
+> - `GET /neighbors/{node_id}` — 특정 노드의 이웃 조회 (1~3단계)
 > - `DELETE /nodes/{id}` — 특정 노드 삭제
 > - `DELETE /all` — 전체 데이터 삭제
 > - `GET /stats` — 통계 (노드 몇 개, 관계 몇 개)
@@ -1536,11 +1545,30 @@ Execute만 누르면 됩니다 (입력값 없음).
 > `nodes` 배열에 2개, `relationships` 배열에 1개가 보이면 완벽합니다!
 > **참고:** `id`가 `"4:abc123:0"` 같은 문자열로 나오는 것이 정상입니다. Neo4j 5.x의 `elementId()` 형식입니다.
 
-**⑤ 통계 — `GET /graph/stats`**
+**⑤ 노드 검색 — `GET /graph/search?q=김철수`**
+
+> 검색어를 입력하면 노드의 모든 속성에서 키워드를 검색합니다. `label` 파라미터로 특정 타입만 검색할 수도 있습니다.
+>
+> - `q=김철수` → 이름에 "김철수"가 포함된 노드
+> - `q=서울&label=Location` → Location 타입 중 "서울"이 포함된 노드
+>
+> **왜 필요한가?** 그래프에 노드가 수십~수백 개 쌓이면, 전체 조회(`GET /nodes`)로는 원하는 것을 찾기 어렵습니다. 수사관이 "김"이라고 검색하면 김철수, 김영수 등 관련 인물을 빠르게 찾을 수 있습니다.
+>
+> **Cypher 학습 포인트:** 이 API 내부에서는 `WHERE ... CONTAINS $keyword` 패턴을 사용합니다. 세션 2에서 배운 `WHERE` 절의 실전 활용입니다.
+
+**⑥ 이웃 조회 — `GET /graph/neighbors/{node_id}?depth=1`**
+
+> 특정 노드에서 1~3단계 이내로 연결된 이웃 노드와 관계를 반환합니다. `node_id`는 `GET /graph/nodes`에서 확인할 수 있습니다.
+>
+> **왜 필요한가?** "이 용의자와 직접 연결된 모든 사람/장소/조직을 보고 싶다"는 요구를 처리합니다. `depth=2`로 하면 2단계까지, `depth=3`이면 3단계까지 펼칩니다.
+>
+> **Cypher 학습 포인트:** 이 API 내부에서는 `MATCH (start)-[*1..N]-(neighbor)` 가변길이 관계 패턴을 사용합니다. 세션 2에서 배운 경로 탐색의 실전 활용입니다.
+
+**⑦ 통계 — `GET /graph/stats`**
 
 > `{"node_count": 2, "rel_count": 1}`이 나오면 우리 API가 모두 정상 동작하는 겁니다!
 
-**⑥ 전체 삭제 — `DELETE /graph/all`**
+**⑧ 전체 삭제 — `DELETE /graph/all`**
 
 > 테스트 데이터를 정리합니다. 프론트엔드에서 처음부터 깨끗하게 시작하기 위해 초기화합니다.
 > `{"message": "전체 그래프 초기화 완료"}`가 나오면 성공!
@@ -1580,6 +1608,97 @@ npm run dev      # 프론트엔드 서버 실행
 | 프론트엔드에서 API 호출 시 `CORS error` | CORS 미설정 | `main.py`의 CORS 미들웨어 설정 확인 |
 | `port is already allocated` (Docker) | 이미 Neo4j가 실행 중 | `docker compose down` 후 다시 `up -d` |
 | MERGE가 중복 노드를 만듦 | 식별 키가 다름 (예: 공백 차이) | `GET /graph/duplicates`로 확인, `SHOW CONSTRAINTS`로 제약 확인 |
+
+---
+
+## 세션 3.5 — CRUD 완성 + 그래프 내보내기/가져오기
+
+> **유형**: 실습 (라이브 코딩)
+>
+> 세션 3에서 Create/Read/Delete를 만들었지만, **Update(수정)** 가 빠져 있었습니다. 이 세션에서는 CRUD의 'U'를 완성하고, 실습 중 실수를 복구할 수 있는 **그래프 백업/복원** 기능을 만듭니다.
+
+### 3.5.1 왜 Update와 Export가 필요한가
+
+**Update가 필요한 상황:**
+- LLM이 추출한 인물의 `role`이 "관계인"인데, 수사가 진행되면서 "용의자"로 변경해야 할 때
+- 날짜/시간 정보가 잘못 들어갔을 때
+- 관계의 속성(예: 통화 횟수)을 업데이트해야 할 때
+
+**Export/Import가 필요한 상황:**
+- 실습 중 `DELETE /graph/all`을 실수로 눌렀을 때 복구
+- 특정 시점의 그래프 상태를 저장해두고 나중에 비교
+- 다른 수강생에게 그래프 데이터를 공유
+
+### 3.5.2 노드/관계 수정 API 구현
+
+> [라이브 코딩] | 파일: `backend/app/routers/graph.py` (엔드포인트 추가)
+>
+> 기존 graph.py 파일의 **맨 아래에** 새 엔드포인트를 추가합니다. 기존 코드는 건드리지 않습니다!
+
+> `backend/app/routers/graph.py`에 추가하는 API들:
+> - `PATCH /graph/nodes/{node_id}` — 노드 속성 수정 (전달된 속성만 덮어씀)
+> - `DELETE /graph/relationships/{rel_id}` — 개별 관계 삭제
+> - `PATCH /graph/relationships/{rel_id}` — 관계 속성 수정
+>
+> **Cypher 학습 포인트:**
+>
+> | 문법 | 설명 | 예시 |
+> |------|------|------|
+> | `SET n.prop = $val` | 특정 속성만 변경 | `SET n.role = '용의자'` |
+> | `SET n += $props` | 여러 속성을 한 번에 덮어쓰기 | `SET n += {role: '용의자', age: 40}` |
+> | `SET r += $props` | 관계 속성 업데이트 | `SET r += {count: 8}` |
+> | `elementId(r)` | 관계의 고유 ID 가져오기 | `WHERE elementId(r) = $id` |
+
+### 3.5.3 그래프 내보내기/가져오기 API 구현
+
+> [라이브 코딩] | 파일: `backend/app/routers/graph.py` (엔드포인트 추가) + `backend/app/models.py` (모델 추가)
+
+> 추가하는 API:
+> - `GET /graph/export` — 현재 그래프의 모든 노드/관계를 JSON으로 반환 (다운로드 가능)
+> - `POST /graph/import` — JSON 데이터로 그래프를 복원 (`clear_first=true` 옵션 지원)
+>
+> **Pydantic 모델 추가 (`models.py`):**
+>
+> ```python
+> class GraphImportData(BaseModel):
+>     nodes: list[dict]        # export에서 반환된 nodes 배열
+>     relationships: list[dict] # export에서 반환된 relationships 배열
+> ```
+>
+> **Import 동작 원리:**
+> 1. `clear_first=true`이면 기존 그래프를 먼저 삭제
+> 2. nodes 배열을 순회하며 각 노드를 MERGE로 생성 (LABEL_KEY_MAP 활용)
+> 3. relationships 배열을 순회하며 각 관계를 MERGE로 생성
+> 4. MERGE 덕분에 이미 있는 데이터와 충돌 없이 안전하게 복원
+
+### 3.5.4 Swagger에서 테스트하기
+
+**① 노드 속성 수정 — `PATCH /graph/nodes/{node_id}`**
+
+먼저 `GET /graph/nodes`에서 수정할 노드의 ID를 확인합니다. 그 다음 Request body에:
+
+```json
+{"role": "용의자", "description": "핵심 용의자로 격상"}
+```
+
+> 기존 속성(name, age 등)은 유지되고, 전달한 속성만 덮어씁니다. 이것이 `SET n += $props`의 동작입니다.
+
+**② 그래프 내보내기/가져오기 사이클**
+
+1. `GET /graph/export` → JSON 응답을 복사
+2. `DELETE /graph/all` → 전체 삭제 (일부러 실수 상황 재현)
+3. `POST /graph/import` → 복사해둔 JSON을 body에 붙여넣기, `clear_first=false`
+4. `GET /graph/stats` → 노드/관계 수가 복원되었는지 확인!
+
+> **체크포인트**: CRUD의 모든 동작(Create/Read/Update/Delete)이 완성되고, 그래프 백업/복원이 가능합니다!
+
+**세션 3.5 트러블슈팅:**
+
+| 증상 | 원인 | 해결법 |
+|---|---|---|
+| `PATCH`에서 404 에러 | node_id가 잘못됨 | `GET /graph/nodes`에서 정확한 `id` 값 복사 |
+| Import 후 노드 수가 다름 | 일부 노드에 식별 키가 없음 | export JSON에서 props가 빈 노드 확인 |
+| Import 시 관계가 생성 안 됨 | from/to 노드가 아직 없음 | nodes를 먼저 import한 후 relationships가 처리됨 (순서 보장) |
 
 ---
 
@@ -2101,6 +2220,129 @@ RETURN suspect.name, victim.name,
 
 ---
 
+## 세션 5.5 — 추출 품질 검증 파이프라인 구현
+
+> **유형**: 실습 (라이브 코딩)
+>
+> 세션 4에서 "LLM의 7가지 실수 유형"을 이론으로 배웠고, 세션 5에서 직접 추출을 해봤습니다. 이 세션에서는 **추출 결과가 정말 맞는지 자동으로 검증하는 API**를 만듭니다. "AI가 한 일을 다른 AI가 검증한다"는 **LLM Self-Check 패턴**을 실전에서 구현합니다.
+
+### 5.5.1 LLM Self-Check 패턴이란
+
+세션 4에서 "환각, 방향 오류, 엔티티 분리" 같은 실수 유형을 배웠습니다. 사람이 일일이 원본과 대조하면 정확하지만, 문서가 많아지면 불가능합니다.
+
+**해결: AI에게 AI의 결과를 검증시킨다!**
+
+```
+[1단계] AI-A가 텍스트에서 엔티티/관계 추출 (세션 5에서 구현)
+    ↓
+[2단계] AI-B에게 "원본 텍스트"와 "추출 결과"를 함께 주고
+        "이 추출에 오류가 있는지 검증해" 라고 요청 ← 이걸 만듭니다!
+    ↓
+[3단계] AI-B가 오류 목록 + 심각도 + 수정 제안을 반환
+```
+
+> **같은 AI(GPT-4o)를 쓰는데 왜 효과가 있나요?** 추출과 검증은 **다른 작업**이기 때문입니다. 추출은 "정보를 뽑아라"이고, 검증은 "이미 뽑힌 결과가 원본과 일치하는지 비교하라"입니다. 비교/대조 작업은 LLM이 더 잘하는 영역입니다.
+
+### 5.5.2 검증 프롬프트 모듈
+
+> [라이브 코딩] | 파일: `backend/app/prompts/validation.py` (신규 생성)
+>
+> `backend/app/prompts/validation.py`에서 만드는 프롬프트 2개:
+>
+> 1. **VALIDATION_SYSTEM_PROMPT** — "원본 텍스트와 추출 결과를 비교하여 6가지 오류 유형을 점검하라"
+>    - 환각, 누락, 방향 오류, 엔티티 분리, 속성 누락, 추론→사실 전환
+>    - 각 이슈에 severity(high/medium/low)와 수정 제안을 포함
+>    - JSON 형식으로 출력 강제
+>
+> 2. **FIX_SUGGESTION_PROMPT** — "데이터 품질 이슈 목록을 보고 구체적 수정 방법을 제안하라"
+>    - 실행 가능한 조치 (예: "김철수 노드의 role을 '용의자'로 설정")
+>    - Markdown 형식으로 출력
+
+### 5.5.3 검증 엔드포인트 구현
+
+> [라이브 코딩] | 파일: `backend/app/routers/validate.py` (신규 생성) → `backend/app/main.py` (라우터 추가)
+
+> `backend/app/routers/validate.py`에서 만드는 API들:
+>
+> | API | 기능 | 교육 포인트 |
+> |-----|------|-------------|
+> | `POST /validate/check` | 원본 텍스트 + 추출 결과 → LLM이 오류 탐지 | LLM Self-Check, 프롬프트 체이닝 |
+> | `GET /validate/quality-report` | 전체 그래프 품질 종합 점검 | 여러 검증을 조합하는 파이프라인 패턴 |
+> | `GET /validate/orphan-nodes` | 관계 없는 고립 노드 탐지 | `NOT EXISTS { (n)-[]-() }` 패턴 |
+> | `GET /validate/missing-properties` | 필수 속성 누락 노드 탐지 | `WHERE n.prop IS NULL` 패턴 |
+> | `POST /validate/suggest-fixes` | LLM이 수정 방법 제안 | 데이터 수집→LLM 분석 (report.py와 동일 구조) |
+>
+> **코드 구조 — `_check_direction_errors()` 해설:**
+>
+> 온톨로지 규칙(Domain→Range)에 어긋나는 관계를 자동 탐지합니다:
+>
+> ```python
+> # "WORKS_FOR는 Person→Organization이어야 하는데,
+> #  Organization→Person으로 되어있으면 방향 오류!"
+> checks = [
+>     ("WORKS_FOR", "Organization", "Person", "..."),
+>     ("OWNS", "Vehicle", "Person", "..."),
+>     # ...
+> ]
+> ```
+>
+> 세션 1에서 배운 온톨로지의 의미 규칙이 여기서 **코드로 강제**됩니다!
+
+### 5.5.4 Swagger에서 품질 검증 테스트
+
+**① LLM Self-Check — `POST /validate/check`**
+
+세션 5에서 사용한 문서 텍스트와 그 추출 결과를 함께 넣어봅니다:
+
+```json
+{
+  "original_text": "목격자 이영희(여, 42세)는 2025년 3월 5일 밤 10시경 서울역 3번 출구에서...",
+  "extracted_data": {
+    "entities": [...],
+    "relationships": [...]
+  }
+}
+```
+
+> 응답에서 `issues` 배열을 살펴보세요:
+> - `type`: 오류 유형 (hallucination, missing, direction_error 등)
+> - `severity`: 심각도 (high면 수사에 영향)
+> - `suggestion`: 어떻게 고치면 되는지
+>
+> **세션 4에서 배운 7가지 실수 유형 표와 대조해 보세요!**
+
+**② 전체 품질 점검 — `GET /validate/quality-report`**
+
+```json
+{
+  "quality_score": 0.85,
+  "total_issues": 3,
+  "orphan_nodes": [...],
+  "missing_properties": [...],
+  "direction_errors": [...],
+  "low_confidence_relations": [...]
+}
+```
+
+> `quality_score`가 1.0에 가까울수록 데이터 품질이 좋습니다. 이슈가 있으면 `POST /validate/suggest-fixes`로 수정 방법을 받아보세요.
+
+**③ 고립 노드 확인 — `GET /validate/orphan-nodes`**
+
+> 아무런 관계도 없는 노드 = LLM이 엔티티는 추출했지만 관계를 빠뜨렸을 가능성. 또는 다른 문서에서 연결될 예정인 노드.
+
+> **체크포인트**: 추출 결과를 자동 검증하고, 데이터 품질 이슈를 발견하고, AI가 수정 방법을 제안합니다!
+>
+> **Cypher 학습 포인트 정리:**
+>
+> | 패턴 | 용도 |
+> |------|------|
+> | `NOT EXISTS { (n)-[]-() }` | 관계 없는 노드 탐지 |
+> | `WHERE n.prop IS NULL` | 속성 누락 탐지 |
+> | `MATCH (a:WrongType)-[:REL]->(b:WrongType)` | 방향 오류 탐지 |
+> | `WHERE r.confidence < 0.5` | 저신뢰도 데이터 필터링 |
+
+---
+
 ## 세션 6 — GraphRAG: 자연어 질의 → 그래프 추론 → 답변
 
 > **유형**: 실습 (라이브 코딩)
@@ -2375,6 +2617,152 @@ Execute를 누르면, AI가 Cypher를 만들 때 참고하는 **현재 그래프
 
 ---
 
+## 세션 6.5 — 고급 GraphRAG: 멀티턴 대화 + Cypher 해설
+
+> **유형**: 실습 (라이브 코딩)
+>
+> 세션 6에서 만든 질의응답은 **단발 질문**만 가능합니다. "서울역에 누가 있었어?" 다음에 "그 중 용의자는?"이라고 물으면 AI가 "그"가 뭔지 모릅니다. 이 세션에서는 **대화 맥락을 유지하는 멀티턴 Q&A**를 만들고, AI가 생성한 Cypher를 **한국어로 해설하는 교육 도구**도 추가합니다.
+
+### 6.5.1 왜 멀티턴 대화가 필요한가
+
+**단발 질의의 한계:**
+
+```
+사용자: "3월 5일 서울역에 있었던 사람은?"
+AI: "김철수, 박영수, 이영희가 있었습니다."
+
+사용자: "그 중 용의자는 누구야?"
+AI: "??? '그'가 뭔지 모르겠습니다..."  ← 이전 대화를 기억 못 함!
+```
+
+**멀티턴 대화:**
+
+```
+사용자: "3월 5일 서울역에 있었던 사람은?"
+AI: "김철수, 박영수, 이영희가 있었습니다."
+
+사용자: "그 중 용의자는 누구야?"
+AI: "앞서 언급한 인물 중 용의자로 분류된 사람은 김철수와 박영수입니다."
+     ← 이전 대화를 기억하고 이어감!
+```
+
+실제 수사 질의는 항상 연쇄적입니다. "누가 있었어?" → "그 사람은 누구 알아?" → "그들의 통화 기록은?" 이 흐름을 자연스럽게 이어가려면 대화 맥락 유지가 필수입니다.
+
+### 6.5.2 멀티턴 대화 프롬프트 설계
+
+> [라이브 코딩] | 파일: `backend/app/prompts/conversation.py` (신규 생성)
+>
+> `backend/app/prompts/conversation.py`에서 만드는 프롬프트:
+>
+> 1. **CONVERSATION_CYPHER_PROMPT** — 대화 히스토리를 포함한 Cypher 생성 프롬프트
+>    - `{history}`: 이전 질문/답변 쌍이 채워짐
+>    - "이전 답변에서 '김철수'를 언급했고 사용자가 '그 사람은?'이라고 물으면 김철수에 대해 조회"
+>
+> 2. **CONVERSATION_ANSWER_PROMPT** — 대화 맥락을 유지한 답변 생성 프롬프트
+>    - "이전 대화에서 이미 설명한 내용은 반복하지 말 것"
+>
+> 3. **CYPHER_EXPLAIN_PROMPT** — Cypher 쿼리를 한국어로 해설하는 프롬프트
+>
+> 4. **SUGGEST_QUESTIONS_PROMPT** — 현재 그래프 기반 추천 질문 생성 프롬프트
+
+### 6.5.3 멀티턴 대화 엔드포인트 구현
+
+> [라이브 코딩] | 파일: `backend/app/routers/conversation.py` (신규 생성) → `backend/app/main.py` (라우터 추가)
+>
+> **대화 상태 관리 방식 — In-Memory Dictionary:**
+>
+> ```python
+> _sessions: dict[str, list[dict]] = {}
+> # 키: session_id (8자리 UUID)
+> # 값: [{"question": "...", "answer": "...", "cypher": "..."}, ...]
+> ```
+>
+> 프로덕션에서는 Redis나 DB를 쓰겠지만, 교육용으로는 Python dictionary로 충분합니다.
+>
+> **토큰 관리**: 대화가 길어지면 프롬프트도 길어져서 비용이 증가합니다. `MAX_HISTORY_TURNS = 10`으로 제한하여 최근 10턴만 히스토리에 포함합니다.
+
+> `backend/app/routers/conversation.py`에서 만드는 API들:
+>
+> | API | 기능 |
+> |-----|------|
+> | `POST /conversation/start` | 새 대화 세션 시작 (session_id 반환) + 첫 질문 답변 |
+> | `POST /conversation/message` | 기존 세션에서 후속 질문 (맥락 유지) |
+> | `GET /conversation/history/{session_id}` | 대화 이력 조회 |
+> | `GET /conversation/sessions` | 활성 세션 목록 |
+
+### 6.5.4 Cypher 해설 + 질문 추천 엔드포인트
+
+> [라이브 코딩] | 파일: `backend/app/routers/ask.py` (엔드포인트 추가)
+>
+> 기존 ask.py의 **맨 아래에** 2개 엔드포인트를 추가합니다:
+>
+> | API | 기능 |
+> |-----|------|
+> | `POST /ask/explain-cypher` | Cypher 쿼리를 한국어로 한 줄씩 해설 |
+> | `POST /ask/suggest-questions` | 현재 그래프 기반 추천 질문 5개 생성 |
+>
+> **explain-cypher의 활용**: 세션 6에서 AI가 생성한 Cypher를 이해하고 싶을 때 사용합니다. "이 쿼리가 뭘 하는 거지?"를 AI가 설명해줍니다.
+
+### 6.5.5 Swagger에서 멀티턴 대화 테스트
+
+**① 대화 시작 — `POST /conversation/start`**
+
+```json
+{
+  "first_question": "3월 5일 서울역에 있었던 사람은 누구인가?"
+}
+```
+
+> 응답에서 `session_id`를 복사하세요! 이 ID로 대화를 이어갑니다.
+
+**② 후속 질문 — `POST /conversation/message`**
+
+```json
+{
+  "session_id": "a1b2c3d4",
+  "question": "그 중 용의자로 분류된 사람은?"
+}
+```
+
+> AI가 이전 대화에서 "서울역에 김철수, 박영수, 이영희가 있었다"를 기억하고, 그 중 용의자를 답합니다!
+
+```json
+{
+  "session_id": "a1b2c3d4",
+  "question": "그 용의자들과 피해자의 관계는?"
+}
+```
+
+> 3턴째 — AI가 앞의 두 대화를 모두 기억하고 연쇄적으로 답변합니다.
+
+**③ Cypher 해설 — `POST /ask/explain-cypher`**
+
+위 대화에서 `cypher_used` 필드에 나온 Cypher를 복사해서:
+
+```json
+{
+  "cypher": "MATCH (p:Person)-[r:WAS_AT]->(l:Location) WHERE l.name CONTAINS '서울역' AND r.date CONTAINS '03-05' RETURN p.name, p.role, r.time ORDER BY r.time"
+}
+```
+
+> AI가 이 Cypher를 "이 쿼리는 3월 5일에 서울역 관련 장소에 있었던 사람을 시간순으로 조회합니다..."처럼 한국어로 해설합니다!
+
+**④ 추천 질문 — `POST /ask/suggest-questions`**
+
+> 현재 그래프에 어떤 데이터가 있는지 분석하여, 수사에 유용한 질문 5개를 추천합니다. 뭘 물어봐야 할지 모를 때 유용합니다!
+
+> **체크포인트**: 연쇄 질문으로 수사를 이어갈 수 있고, AI가 생성한 Cypher를 한국어로 이해할 수 있습니다!
+
+**세션 6.5 트러블슈팅:**
+
+| 증상 | 원인 | 해결법 |
+|---|---|---|
+| "세션을 찾을 수 없습니다" 에러 | session_id 오타 또는 서버 재시작 | 서버 재시작하면 메모리가 초기화됨 → `/conversation/start`로 새 세션 |
+| 후속 질문에서 맥락을 못 잇는 경우 | 대화 히스토리가 너무 김 | MAX_HISTORY_TURNS(10)를 넘으면 오래된 턴이 잘림 |
+| explain-cypher 결과가 부정확 | Cypher가 너무 복잡 | 간단한 쿼리부터 테스트, 복잡한 쿼리는 부분적으로 나눠서 해설 |
+
+---
+
 ## 세션 7 — 고도화: 그래프 알고리즘 + 수사 분석
 
 > **유형**: 실습 (라이브 코딩)
@@ -2644,6 +3032,287 @@ URL 파라미터에 두 인물의 이름을 입력합니다:
 
 ---
 
+## 세션 7.3 — 수사 특화 분석: 자금 흐름 추적 + 시간대 분석
+
+> **유형**: 실습 (라이브 코딩)
+>
+> 세션 7에서 일반적인 그래프 알고리즘(중심성, 커뮤니티, 경로)을 배웠습니다. 이 세션에서는 **수사에서 가장 중요한 두 가지 분석** — "돈이 어디로 흘렀는가"와 "그 시간에 누가 어디에 있었는가"를 Cypher로 구현합니다.
+
+### 7.3.1 왜 자금 흐름과 시간대 분석인가
+
+수사에서 범인을 특정하는 핵심 요소는 **동기(Motive)**, **기회(Opportunity)**, **수단(Means)** 입니다:
+
+| 요소 | 분석 방법 | 이 세션에서 만드는 API |
+|------|-----------|----------------------|
+| **동기** (왜?) | 자금 흐름 추적 → 보험금, 채무 관계 | `/investigation/money-flow` |
+| **기회** (언제 어디서?) | 시간대별 위치 분석 → 알리바이 검증 | `/investigation/alibi-check`, `/investigation/activity-window` |
+| **수단** (누구와?) | 접촉 빈도 분석 → 공범 관계 | `/investigation/contact-frequency` |
+
+**자금 흐름 추적이 중요한 이유:**
+
+```
+이정민 --[TRANSFERRED_TO: 500만원]--> ㈜한성물류
+                                          ↑
+                                    박영수 --[OWNS]--> ㈜한성물류
+```
+
+개별 거래만 보면 "이정민이 한성물류에 500만원 보냈다"는 평범한 이체. 하지만 그래프에서 `TRANSFERRED_TO`와 `OWNS` 관계를 **체인으로 추적**하면, "이정민 → 한성물류 → 박영수"라는 자금 흐름이 드러납니다!
+
+### 7.3.2 수사 분석 엔드포인트 구현
+
+> [라이브 코딩] | 파일: `backend/app/routers/investigation.py` (신규 생성) → `backend/app/main.py` (라우터 추가)
+
+> `backend/app/routers/investigation.py`에서 만드는 API들:
+>
+> | API | 기능 | Cypher 학습 포인트 |
+> |-----|------|--------------------|
+> | `GET /investigation/money-flow` | 전체 자금 흐름 그래프 | 가변 길이 경로 `[:TRANSFERRED_TO\|OWNS*1..4]` |
+> | `GET /investigation/money-flow/{name}` | 특정 인물 관련 자금 유입/유출 | 양방향 경로, CASE WHEN |
+> | `GET /investigation/activity-window` | 특정 시간 범위 내 모든 활동 | 시간 비교 `r.time >= $start AND r.time <= $end` |
+> | `GET /investigation/alibi-check/{name}` | 알리바이 검증 | OPTIONAL MATCH, 복합 CASE |
+> | `GET /investigation/contact-frequency` | 인물 간 접촉 빈도 집계 | GROUP BY 패턴, `count()`, `collect(DISTINCT ...)` |
+> | `GET /investigation/network-impact/{name}` | 인물 제거 시 네트워크 영향 | 브릿지 패턴 `(a)-[]-(p)-[]-(b) WHERE NOT (a)-[]-(b)` |
+>
+> **핵심 Cypher 패턴 — 가변 길이 관계 타입 지정:**
+>
+> ```cypher
+> // 여러 종류의 관계를 동시에 따라가기
+> MATCH path = (sender)-[:TRANSFERRED_TO|OWNS*1..4]->(receiver)
+> // TRANSFERRED_TO 또는 OWNS 관계를 1~4단계까지 따라감
+> // → "이정민 →TRANSFERRED_TO→ 한성물류 ←OWNS← 박영수" 경로 발견!
+> ```
+>
+> **핵심 Cypher 패턴 — 브릿지 탐지 (network-impact):**
+>
+> ```cypher
+> // "이 사람을 빼면 연결이 끊기는 쌍"을 찾는다
+> MATCH (a)-[r1]-(p:Person {name: $name})-[r2]-(b)
+> WHERE a <> b AND NOT (a)-[]-(b)
+> // a와 b가 p를 통해서만 연결 → p가 브릿지(다리) 역할
+> ```
+
+### 7.3.3 Swagger에서 수사 분석 테스트
+
+**① 전체 자금 흐름 — `GET /investigation/money-flow`**
+
+```json
+[{
+  "from_entity": "이정민", "from_type": "Person",
+  "to_entity": "㈜한성물류", "to_type": "Organization",
+  "rel_types": ["TRANSFERRED_TO"],
+  "rel_props": [{"amount": "500만원"}],
+  "hops": 1
+}]
+```
+
+> `hops`가 1이면 직접 거래, 2 이상이면 **중간 경유지를 거친 간접 흐름**입니다!
+
+**② 특정 인물 자금 흐름 — `GET /investigation/money-flow/박영수`**
+
+> 박영수를 중심으로 들어온 돈(incoming)과 나간 돈(outgoing)을 분리해서 보여줍니다.
+
+**③ 시간대 활동 조회 — `GET /investigation/activity-window?date=2025-03-05&start_time=21:00&end_time=23:00`**
+
+> 사건 당일 21시~23시 사이에 발생한 **모든 활동**이 시간순으로 나열됩니다. "이 시간에 누가 어디서 뭘 했는가"를 한눈에 파악!
+
+**④ 알리바이 검증 — `GET /investigation/alibi-check/김철수?date=2025-03-05&time=22:00`**
+
+```json
+{
+  "person": "김철수",
+  "date": "2025-03-05",
+  "check_time": "22:00",
+  "locations": [
+    {"location": "서울역 3번 출구", "time": "22:00", "alibi_status": "present"}
+  ],
+  "other_activities": [
+    {"action": "CALLED", "target": "박영수", "time": "23:45"}
+  ],
+  "found_locations": true
+}
+```
+
+> `alibi_status`가 `"present"` — 김철수는 22시에 서울역에 있었다는 것이 확인됩니다!
+
+**⑤ 접촉 빈도 분석 — `GET /investigation/contact-frequency`**
+
+> 모든 인물 쌍의 직접 접촉(통화, 만남)과 같은 장소 동시 출현을 집계합니다. 빈도가 높을수록 공범 가능성!
+
+**⑥ 네트워크 영향 분석 — `GET /investigation/network-impact/박영수`**
+
+> 박영수를 네트워크에서 제거하면 어떤 연결이 끊어지는지 분석합니다. `bridge_count`가 높으면 핵심 매개자!
+
+> **체크포인트**: 자금 흐름 추적으로 동기를 파악하고, 시간대 분석으로 알리바이를 검증할 수 있습니다!
+
+**세션 7.3 트러블슈팅:**
+
+| 증상 | 원인 | 해결법 |
+|---|---|---|
+| money-flow 결과가 빈 배열 | TRANSFERRED_TO 관계가 없음 | 문서 3(금융 거래 보고)이 투입되었는지 확인 |
+| alibi-check에서 locations가 빈 배열 | WAS_AT 관계에 date가 없거나 형식 다름 | 관계 속성에서 date 형식 확인 (`CONTAINS` 사용) |
+| activity-window 시간 범위 결과 없음 | time 속성이 없는 관계 | `start_time`, `end_time` 생략하고 date만으로 조회 |
+| network-impact에서 bridge가 0 | 모든 노드가 다중 경로로 연결 | 정상 — 긴밀한 네트워크에서는 브릿지가 없을 수 있음 |
+
+---
+
+## 세션 7.5 — AI 수사 리포트 자동 생성
+
+> **유형**: 실습 (라이브 코딩)
+>
+> 이 세션에서는 지금까지 만든 **모든 기능(그래프 데이터 + 분석 알고리즘 + LLM)**을 결합하여, AI가 자동으로 수사 보고서를 작성하는 기능을 만듭니다. 세션 6의 "질문에 답하는 AI"에서 한 단계 더 나아가, **AI가 스스로 데이터를 수집하고 종합 보고서를 작성**하는 것입니다.
+
+### 7.5.1 왜 수사 리포트 자동 생성이 필요한가
+
+지금까지 만든 시스템의 흐름을 돌아보면:
+
+```
+세션 5: 수사 보고서 → AI가 정보 추출 → 그래프 저장
+세션 6: 사용자 질문 → AI가 Cypher 생성 → 그래프 검색 → 답변
+세션 7: 그래프 알고리즘으로 중심성/커뮤니티/경로 분석
+```
+
+그런데 이 모든 결과를 종합해서 "결국 범인이 누구인가?"를 보고서로 만들려면, 수사관이 여러 API를 하나하나 호출하고, 결과를 머릿속에서 조합해야 합니다. **이 과정을 AI가 자동으로 해주면 어떨까요?**
+
+```
+[새로운 흐름]
+"종합 보고서 생성" 버튼 클릭
+    ↓
+[1단계] 그래프 통계, 중심성 분석, 피해자 연결 인물, 공통 장소 데이터를 자동 수집
+    ↓
+[2단계] 수집한 데이터를 LLM에게 전달하여 수사 보고서 작성 요청
+    ↓
+[3단계] AI가 데이터를 종합 분석하여 구조화된 보고서 생성
+    ↓
+결과: 사건 개요, 핵심 인물 분석, 관계 네트워크, 수사 결론이 담긴 보고서!
+```
+
+> **세션 6과의 차이:**
+> - 세션 6(질의응답): 사용자가 **질문을 해야** AI가 답함. "무엇을 물어볼지"를 사람이 결정
+> - 세션 7.5(리포트): AI가 **스스로 데이터를 모아서** 분석하고 보고서를 작성. 사람이 질문하지 않아도 핵심을 짚어줌
+
+### 7.5.2 리포트 프롬프트 설계
+
+> [라이브 코딩] | 파일: `backend/app/prompts/report.py` (신규 생성)
+>
+> 이 프롬프트는 세션 5의 추출 프롬프트, 세션 6의 Cypher 생성 프롬프트에 이어 **세 번째 프롬프트**입니다. 각 프롬프트의 역할을 비교해 보면:
+>
+> | 프롬프트 | 역할 | 입력 | 출력 |
+> |----------|------|------|------|
+> | 추출 프롬프트 (세션 5) | 텍스트에서 엔티티/관계 추출 | 수사 보고서 텍스트 | JSON (entities, relationships) |
+> | Cypher 생성 프롬프트 (세션 6) | 자연어를 Cypher로 변환 | 질문 + 스키마 | Cypher 쿼리 |
+> | **리포트 프롬프트 (세션 7.5)** | **그래프 데이터를 종합 분석** | **분석 데이터 (통계, 중심성, 연결 등)** | **Markdown 수사 보고서** |
+>
+> `backend/app/prompts/report.py`에서 만드는 프롬프트 3개:
+>
+> 1. **REPORT_SYSTEM_PROMPT** — "당신은 수사 분석 전문가입니다" + 보고서 작성 규칙
+> 2. **SUSPECT_PROFILE_PROMPT** — 특정 인물의 기본 정보, 관계, 타임라인, 네트워크 수치를 받아서 수사 프로파일 작성
+> 3. **FULL_REPORT_PROMPT** — 전체 그래프의 통계, 중심성, 의심 연결, 공통 장소 데이터를 받아서 종합 수사 보고서 작성
+>
+> **프롬프트 설계의 핵심 원칙 (복습):**
+> - "데이터에 있는 사실만 근거로 사용할 것" — 환각 방지
+> - "추론은 '~로 추정됨'으로 명확히 구분할 것" — 사실과 추론 분리
+> - 구조화된 Markdown 형식 강제 — 일관된 보고서 품질
+
+### 7.5.3 리포트 엔드포인트 구현
+
+> [라이브 코딩] | 파일: `backend/app/routers/report.py` (신규 생성) → `backend/app/main.py` (라우터 추가)
+>
+> **이 라우터가 하는 일을 쉽게 설명하면:**
+>
+> ```
+> 사용자: "박영수의 프로파일을 만들어줘"
+>     ↓
+> [_collect_person_info] Neo4j에서 박영수의 기본 정보, 관계, 타임라인, 연결 수를 수집
+>     ↓
+> [LLM 호출] 수집된 데이터 + 프롬프트를 AI에게 전달
+>     ↓
+> AI가 Markdown 형식의 수사 프로파일 보고서 생성!
+> ```
+
+> `backend/app/routers/report.py`에서 만드는 API들:
+>
+> | API | 기능 | 쉬운 설명 |
+> |-----|------|-----------|
+> | `GET /suspect-profile/{name}` | 용의자 프로파일 | "이 사람에 대해 알려진 모든 것을 보고서로 만들어줘" |
+> | `GET /full` | 종합 수사 보고서 | "전체 사건을 분석해서 보고서를 작성해줘" |
+>
+> **코드 구조 해설:**
+>
+> 이 라우터는 **데이터 수집 → LLM 생성**의 2단계로 동작합니다:
+>
+> 1. **`_collect_person_info(name)`** — 특정 인물에 대한 4가지 데이터를 Neo4j에서 수집
+>    - 인물 기본 정보 (`properties(p)`)
+>    - 직접 연결된 관계 (방향 포함)
+>    - 행동 타임라인 (날짜/시간순)
+>    - 네트워크 수치 (degree centrality)
+>
+> 2. **`_collect_graph_overview()`** — 전체 그래프에 대한 5가지 데이터를 수집
+>    - 그래프 통계 (노드/관계 수)
+>    - 중심성 상위 인물 (세션 7의 `/analysis/centrality`와 같은 쿼리)
+>    - 피해자 연결 인물 (세션 7의 `/analysis/suspicious-connections`와 같은 쿼리)
+>    - 동일 장소/시간 출현 쌍 (세션 7의 `/analysis/common-locations` 간소화)
+>    - 노드/관계 타입별 수 요약
+>
+> **학습 포인트:**
+> - 이전 세션에서 만든 Cypher 쿼리를 **재활용**합니다 (중심성, 의심 연결, 타임라인)
+> - 수집된 데이터를 `json.dumps()`로 직렬화하여 프롬프트에 삽입합니다
+> - LLM의 출력은 Markdown 형식이므로 프론트엔드에서 바로 렌더링할 수 있습니다
+
+> `backend/app/main.py` — report 라우터 추가 (graph, extract, ask, analysis, **report**, samples)
+
+### 7.5.4 Swagger에서 리포트 테스트하기
+
+> `http://localhost:8000/docs`에서 **report** 섹션을 펼쳐보세요.
+>
+> **주의**: 세션 5에서 수사 자료 6건 이상이 투입되어 있어야 의미 있는 보고서가 나옵니다!
+
+**① 용의자 프로파일 — `GET /report/suspect-profile/{name}`**
+
+`name`에 `박영수` 입력 후 Execute:
+
+> **응답을 살펴보세요! 두 가지 정보가 반환됩니다:**
+>
+> - `profile`: AI가 작성한 수사 프로파일 (Markdown 형식)
+>   - 인물 개요, 관계 네트워크, 행동 분석, 수사 소견 포함
+> - `data_used`: 프로파일 작성에 사용된 데이터 요약
+>   - 관계 수, 타임라인 이벤트 수, 중심성 점수
+>
+> **다른 인물도 시도해 보세요:** `김철수`, `이정민`, `최민호`(피해자) 등
+> 각 인물의 역할과 관계에 따라 프로파일의 내용이 완전히 달라집니다!
+
+**② 종합 수사 보고서 — `GET /report/full`**
+
+Execute를 누르면 전체 그래프를 분석한 종합 보고서가 생성됩니다:
+
+> **응답 구조:**
+>
+> - `report`: AI가 작성한 종합 수사 보고서 (Markdown 형식)
+>   - 사건 개요
+>   - 핵심 인물 분석 (중심성 기준)
+>   - 관계 네트워크 분석 (자금 흐름, 조직 연결)
+>   - 시공간 분석 (동일 장소/시간 출현)
+>   - **수사 결론 및 권고** — AI가 주요 용의자와 근거를 정리!
+>
+> - `data_summary`: 분석에 사용된 데이터 규모
+>   - 총 노드 수, 관계 수, 분석된 인물 수, 의심 쌍 수
+>
+> **핵심**: 이 보고서는 세션 5~7에서 만든 **모든 기능의 종합**입니다. 세션 5의 추출 데이터, 세션 7의 분석 결과를 AI가 하나의 보고서로 엮어냅니다.
+
+**③ 보고서 비교 실습**
+
+같은 데이터에 대해 여러 번 보고서를 생성해 보면, LLM의 `temperature`(0.3)에 의해 표현이 조금씩 달라집니다. 하지만 **근거 데이터(facts)는 동일**하고 **표현(narrative)만 변합니다** — 이것이 프롬프트에서 "데이터에 있는 사실만 사용"을 강제한 효과입니다.
+
+> **세션 7.5 트러블슈팅:**
+>
+> | 증상 | 원인 | 해결법 |
+> |---|---|---|
+> | "그래프에 데이터가 없습니다" 에러 | Neo4j에 수사 자료 미투입 | 세션 5에서 문서 6건 이상 투입 필요 |
+> | 프로파일에 관계 정보가 빈약함 | 해당 인물의 관계가 적음 | 더 많은 문서를 투입하여 그래프 보강 |
+> | 보고서에 환각(없는 정보) 등장 | LLM이 데이터 외 정보를 생성 | 프롬프트의 "사실만 사용" 규칙을 확인, temperature를 0.1로 낮춰서 테스트 |
+> | 응답 시간이 김 (30초+) | 데이터 수집 쿼리 다수 + LLM 호출 | 정상적인 범위, OpenAI 응답 지연은 일시적 |
+
+---
+
 ## 세션 8 — 종합 시나리오: 범인 프로파일링 + 마무리
 
 > **유형**: 실습 + 정리
@@ -2698,8 +3367,16 @@ URL 파라미터에 두 인물의 이름을 입력합니다:
 - 커뮤니티 탐지: "긴밀하게 연결된 그룹은?" → 공범 그룹이 보입니다
 - 경로 분석: "피해자에서 보험 수익자까지의 경로는?" → 동기(돈)와 실행자를 잇는 경로
 
-**단계 4 — 프로파일링 결론 (AI에게 브리핑을 요청하자):**
+**단계 4 — AI 리포트 생성 (세션 7.5에서 만든 기능 활용!):**
 
+먼저 주요 용의자의 프로파일을 자동 생성합니다:
+- Swagger에서 `GET /report/suspect-profile/박영수` 실행 → 박영수의 수사 프로파일 자동 생성!
+- `GET /report/suspect-profile/김철수` 도 실행 → 비교 분석
+
+그리고 종합 보고서를 생성합니다:
+- `GET /report/full` 실행 → AI가 전체 그래프를 분석한 수사 보고서 자동 생성!
+
+채팅 화면에서도 추가 질문을 합니다:
 - "종합적으로, 이 사건의 주요 용의자와 그 근거를 정리해줘"
 - → LLM이 그래프 데이터를 기반으로 수사 브리핑을 생성합니다!
 
@@ -2745,30 +3422,30 @@ URL 파라미터에 두 인물의 이름을 입력합니다:
 **오늘 만든 시스템의 전체 아키텍처:**
 
 ```
-┌─────────────────────────────────────────────┐
-│              Next.js 프론트엔드               │
-│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────────┐   │
-│  │관계도│ │문서  │ │수사  │ │분석      │   │
-│  │뷰어  │ │분석기│ │챗봇  │ │대시보드  │   │
-│  └──┬───┘ └──┬───┘ └──┬───┘ └────┬─────┘   │
-└─────┼────────┼────────┼──────────┼──────────┘
-      │        │        │          │
-┌─────┼────────┼────────┼──────────┼──────────┐
-│     ▼        ▼        ▼          ▼          │
-│              FastAPI 백엔드                   │
-│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────────┐   │
-│  │CRUD  │ │추출  │ │질의  │ │알고리즘  │   │
-│  │API   │ │API   │ │API   │ │분석 API  │   │
-│  └──┬───┘ └──┬───┘ └──┬───┘ └────┬─────┘   │
-│     │     ┌──┴───┐ ┌──┴───┐      │         │
-│     │     │GPT-4o│ │GPT-4o│      │         │
-│     │     └──┬───┘ └──┬───┘      │         │
-│     ▼        ▼        ▼          ▼         │
-│  ┌──────────────────────────────────────┐   │
-│  │            Neo4j + GDS               │   │
-│  │     지식 그래프 + 그래프 알고리즘      │   │
-│  └──────────────────────────────────────┘   │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│                 Next.js 프론트엔드                    │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐              │
+│  │관계도│ │문서  │ │수사  │ │분석  │              │
+│  │뷰어  │ │분석기│ │챗봇  │ │대시보드│             │
+│  └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘              │
+└─────┼────────┼────────┼────────┼───────────────────┘
+      │        │        │        │
+┌─────┼────────┼────────┼────────┼───────────────────┐
+│     ▼        ▼        ▼        ▼                   │
+│                FastAPI 백엔드                        │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────────┐ │
+│  │CRUD  │ │추출  │ │질의  │ │분석  │ │리포트    │ │
+│  │API   │ │API   │ │API   │ │API   │ │생성 API  │ │
+│  └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └────┬─────┘ │
+│     │     ┌──┴───┐ ┌──┴───┐    │     ┌────┴─────┐ │
+│     │     │GPT-4o│ │GPT-4o│    │     │  GPT-4o  │ │
+│     │     └──┬───┘ └──┬───┘    │     └────┬─────┘ │
+│     ▼        ▼        ▼        ▼          ▼       │
+│  ┌────────────────────────────────────────────┐    │
+│  │              Neo4j + GDS                   │    │
+│  │       지식 그래프 + 그래프 알고리즘          │    │
+│  └────────────────────────────────────────────┘    │
+└────────────────────────────────────────────────────┘
 ```
 
 **프로덕션 확장 시 고려사항:**
@@ -2835,6 +3512,18 @@ RETURN doc.title, score, entity, connected
 | **문서 분석기**      | 텍스트 입력 → LLM 추출 결과 미리보기 (트리플 카드) → 수정/승인 → 저장 | 세션 5    |
 | **수사 챗**          | 자연어 질의 → 답변 + 사용된 Cypher 표시 + 관련 서브그래프 하이라이트 | 세션 6    |
 | **분석 대시보드**    | 중심성 순위 (막대), 커뮤니티 색상 그래프, 타임라인, 경로 탐색 | 세션 7~8  |
+| **수사 리포트**      | 용의자 프로파일 자동 생성, 종합 수사 보고서 생성 (Swagger UI에서 직접 호출) | 세션 7.5~8 |
+
+### 추가 실습 세션에서 만드는 Swagger 전용 API (프론트엔드 화면 없음)
+
+> 아래 API들은 프론트엔드 화면이 별도로 제공되지 않습니다. **Swagger UI(`http://localhost:8000/docs`)에서 직접 테스트**합니다.
+
+| 세션 | API 그룹 | 주요 엔드포인트 |
+|------|----------|----------------|
+| 3.5 | 그래프 수정/백업 | `PATCH /graph/nodes/{id}`, `GET /graph/export`, `POST /graph/import` |
+| 5.5 | 추출 품질 검증 | `POST /validate/check`, `GET /validate/quality-report`, `POST /validate/suggest-fixes` |
+| 6.5 | 멀티턴 대화 | `POST /conversation/start`, `POST /conversation/message`, `POST /ask/explain-cypher` |
+| 7.3 | 수사 특화 분석 | `GET /investigation/money-flow`, `GET /investigation/alibi-check/{name}`, `GET /investigation/contact-frequency` |
 
 ---
 
@@ -3055,6 +3744,8 @@ RETURN doc.title, score, entity, connected
 | UNWIND | - | Cypher에서 리스트를 한 줄씩 풀어서 처리하는 구문 |
 | 벡터 인덱스 | Vector Index | Neo4j 5.11+에서 지원하는 임베딩 벡터 기반 유사도 검색 인덱스 |
 | 하이브리드 검색 | Hybrid Search | 벡터 검색(의미 유사도)과 그래프 검색(구조 탐색)을 결합하는 방식 |
+| 수사 프로파일 | Suspect Profile | 특정 인물에 대한 관계, 행동, 네트워크 수치를 종합 분석한 보고서 |
+| 데이터 수집-생성 패턴 | Collect-Generate | DB에서 데이터를 수집한 후 LLM에 전달하여 분석/보고서를 생성하는 패턴 |
 
 ---
 
